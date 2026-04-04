@@ -1,0 +1,121 @@
+* {
+    g-spacing: 10px;
+    g-margin: 0;
+    b-color: rgba(10, 10, 10, 0.9);
+    fg-color: #d4d4d4;
+    fgp-color: #666666;
+    b-radius: 4px;
+    g-padding: 8px;
+    hl-color: rgba(255, 160, 50, 0.20);
+    highlight: bold underline #ffa032;
+    hlt-color: #d4d4d4;
+    alt-color: rgba(255, 255, 255, 0.04);
+    wbg-color: rgba(10, 10, 10, 0.9);
+    w-border: 1px solid;
+    w-border-color: rgba(255, 160, 50, 0.30);
+    w-padding: 12px;
+}
+
+configuration {
+    font: "CaskaydiaCove Nerd Font 13";
+    modi: "drun";
+    show-icons: true;
+    sort: true;
+    sorting-method: "fzf";
+    display-drun: " ";
+}
+
+listview {
+    columns: 1;
+    lines: 7;
+    fixed-height: true;
+    fixed-columns: true;
+    cycle: false;
+    scrollbar: false;
+    border: 0px solid;
+}
+
+window {
+    transparency: "real";
+    width: 750px;
+    height: 500px;
+    border-radius: @b-radius;
+    background-color: @wbg-color;
+    border: @w-border;
+    border-color: @w-border-color;
+    padding: @w-padding;
+}
+
+prompt {
+    text-color: @fg-color;
+}
+
+inputbar {
+    children: ["prompt", "entry"];
+    spacing: @g-spacing;
+}
+
+entry {
+    placeholder: "Search Apps";
+    text-color: @fg-color;
+    placeholder-color: @fgp-color;
+}
+
+mainbox {
+    spacing: @g-spacing;
+    margin: @g-margin;
+    padding: @g-padding;
+    children: ["inputbar", "listview", "message"];
+}
+
+element {
+    spacing: @g-spacing;
+    margin: @g-margin;
+    padding: @g-padding;
+    border: 0px solid;
+    border-radius: @b-radius;
+    border-color: @b-color;
+    background-color: transparent;
+    text-color: @fg-color;
+}
+
+element normal.normal {
+    background-color: transparent;
+    text-color: @fg-color;
+}
+
+element alternate.normal {
+    background-color: transparent;
+    text-color: @fg-color;
+}
+
+element selected.active {
+    background-color: @hl-color;
+    text-color: @hlt-color;
+}
+
+element selected.normal {
+    background-color: @hl-color;
+    text-color: @hlt-color;
+}
+
+element-text, element-icon {
+    background-color: inherit;
+    text-color: inherit;
+}
+
+element-text selected.normal {
+    highlight: bold underline #ffa032;
+    background-color: inherit;
+    text-color: inherit;
+}
+
+message {
+    background-color: #cc4444;
+    border: 0px solid;
+}
+
+textbox {
+    highlight: @highlight;
+    text-color: @fg-color;
+}
