@@ -1,0 +1,23 @@
+# Example local configuration file for machine-specific settings.
+# Copy this file to ~/.config/hypr/local.conf to use it.
+# The local.conf file is ignored by Git, allowing you to have different
+# monitor setups, input settings, and other overrides per machine.
+
+# --- Monitor Settings ---
+# See https://wiki.hypr.land/Configuring/Monitors/
+# monitor = DP-1, 2560x1440@144, 0x0, 1
+# monitor = HDMI-A-1, 1920x1080@60, 2560x0, 1
+
+# --- Input Settings (Cursor Speed) ---
+# See https://wiki.hypr.land/Configuring/Variables/#input
+# input {
+#     sensitivity = 0.0 # -1.0 to 1.0, 0 means no modification.
+#     accel_profile = flat # Use "flat" to disable mouse acceleration
+# }
+
+# --- Device-Specific Config ---
+# See https://wiki.hypr.land/Configuring/Keywords/#per-device-input-configs
+# device {
+#     name = my-mouse
+#     sensitivity = -0.5
+# }
