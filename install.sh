@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- 1. Essential Packages ---
-PACKAGES="hyprland waybar kitty rofi yazi ranger stow git zsh tmux pipewire wireplumber xdg-desktop-portal-hyprland github-cli swaybg"
+PACKAGES="hyprland waybar kitty rofi yazi ranger stow git zsh tmux pipewire wireplumber xdg-desktop-portal-hyprland github-cli swaybg eza bat zsh-autosuggestions zsh-syntax-highlighting"
 
 echo "Refreshing package database and installing essential packages..."
 if command -v pacman &> /dev/null; then
@@ -12,11 +12,12 @@ fi
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
     echo "Installing Oh My Zsh..."
     sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+    # Remove the default .zshrc created by oh-my-zsh so stow can link our own
+    rm -f "$HOME/.zshrc"
 fi
 
 ZSH_CUSTOM=${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}
-[ ! -d "$ZSH_CUSTOM/plugins/zsh-syntax-highlighting" ] && git clone https://github.com/zsh-users/zsh-syntax-highlighting.git $ZSH_CUSTOM/plugins/zsh-syntax-highlighting
-[ ! -d "$ZSH_CUSTOM/plugins/zsh-autosuggestions" ] && git clone https://github.com/zsh-users/zsh-autosuggestions.git $ZSH_CUSTOM/plugins/zsh-autosuggestions
+[ ! -d "$ZSH_CUSTOM/themes/powerlevel10k" ] && git clone --depth=1 https://github.com/romkatv/powerlevel10k.git $ZSH_CUSTOM/themes/powerlevel10k
 
 # --- 3. Nerd Fonts (JetBrainsMono & CaskaydiaCove) ---
 mkdir -p ~/.local/share/fonts
@@ -52,7 +53,7 @@ stow -v -t ~ $PACKAGES_TO_STOW
 # --- 5. Change Default Shell ---
 if [ "$SHELL" != "$(which zsh)" ]; then
     echo "Changing default shell to zsh..."
-    chsh -s $(which zsh)
+    sudo chsh -s $(which zsh) $USER
 fi
 
 # --- 6. Apply Changes ---
