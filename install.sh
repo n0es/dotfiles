@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- 1. Essential Packages ---
-PACKAGES="hyprland waybar kitty rofi yazi ranger stow git zsh tmux pipewire wireplumber xdg-desktop-portal-hyprland github-cli swaybg eza bat zsh-autosuggestions zsh-syntax-highlighting"
+PACKAGES="hyprland waybar kitty rofi yazi ranger stow git zsh tmux pipewire wireplumber pipewire-pulse pipewire-alsa pipewire-audio xdg-desktop-portal-hyprland github-cli swaybg eza bat zsh-autosuggestions zsh-syntax-highlighting"
 
 echo "Refreshing package database and installing essential packages..."
 if command -v pacman &> /dev/null; then
