@@ -50,6 +50,12 @@ PACKAGES_TO_STOW="hypr kitty waybar rofi yazi ranger zsh tmux git wallpapers"
 mkdir -p ~/.config
 stow -v -t ~ $PACKAGES_TO_STOW
 
+# --- 4.5. Machine-specific Configs ---
+if [ ! -f ~/.config/hypr/local.conf ]; then
+    echo "Creating machine-specific local.conf..."
+    cp ~/.config/hypr/local.conf.example ~/.config/hypr/local.conf
+fi
+
 # --- 5. Change Default Shell ---
 if [ "$SHELL" != "$(which zsh)" ]; then
     echo "Changing default shell to zsh..."
