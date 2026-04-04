@@ -49,7 +49,13 @@ PACKAGES_TO_STOW="hypr kitty waybar rofi yazi ranger zsh tmux git wallpapers"
 mkdir -p ~/.config
 stow -v -t ~ $PACKAGES_TO_STOW
 
-# --- 5. Apply Changes ---
+# --- 5. Change Default Shell ---
+if [ "$SHELL" != "$(which zsh)" ]; then
+    echo "Changing default shell to zsh..."
+    chsh -s $(which zsh)
+fi
+
+# --- 6. Apply Changes ---
 if command -v hyprctl &> /dev/null; then
     echo "Forcefully exiting Hyprland to apply all changes..."
     hyprctl dispatch exit
