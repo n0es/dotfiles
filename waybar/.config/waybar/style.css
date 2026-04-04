@@ -41,6 +41,7 @@ window#waybar {
 }
 
 #clock,
+#pulseaudio,
 #network,
 #bluetooth,
 #battery {
@@ -53,6 +54,10 @@ window#waybar {
 #clock {
     font-weight: bold;
     color: #d4d4d4;
+}
+
+#pulseaudio {
+    color: #ffa032;
 }
 
 #network {
