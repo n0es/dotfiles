@@ -43,6 +43,6 @@ echo "Applying dotfiles with Stow..."
 cd ~/projects/dotfiles
 # Ensure target directories exist in ~ before stowing
 mkdir -p ~/.config
-stow -v -t ~ hypr kitty waybar rofi yazi ranger zsh tmux git gtk-3.0
+stow -v -t ~ hypr kitty waybar rofi yazi ranger zsh tmux git 
 
 echo "Setup complete! Please restart your shell or run 'zsh'."
