@@ -1,0 +1,32 @@
+---
+description: Dotfiles repo layout (Stow), install workflow, known bugs, and agent git workflow
+alwaysApply: true
+---
+
+# Dotfiles repository (agent context)
+
+This repository contains the user's dotfiles managed by **GNU Stow**.
+
+## Layout
+
+- **Stow packages**: Top-level dirs (`hypr`, `kitty`, `waybar`, `rofi`, `ranger`, `zsh`, `tmux`, `git`, `wallpapers`, etc.) are packages. Their contents are symlinked into `~` (typically via `stow`).
+- **Install**: `install.sh` is the main entry for a new machine or sync. It may install Arch packages (`pacman`), set up Oh My Zsh and plugins, install Nerd Fonts (JetBrainsMono, CaskaydiaCove), run `stow`, set default shell to `zsh`, and exit Hyprland to apply changes.
+- **Machine-specific Hyprland**: `hyprland.conf` sources `~/.config/hypr/local.conf`. That file is **not** tracked so each host can override monitors, input, etc.
+
+## Critical history (do not regress)
+
+1. **Destructive cleanup loop**: An old `install.sh` used `find` to delete conflicting files before `stow`. When `~/.config/hypr` (or similar) is a symlink to the repo, paths inside still looked like normal files and the script could delete real files **inside the git repo**. Do not add blind deletion around stow without understanding symlink layouts.
+2. **Hyprland autogeneration**: After that bug, Hyprland kept generating default config in the repo; configs were recovered from another machine.
+3. **Hyprland exit**: `Super + M` uses `hyprctl dispatch exit` (or `hyprshutdown` if present) for reliability.
+4. **Wallpaper**: Under `wallpapers/wallpapers/`, applied via `wallpaper.sh` and `swaybg`.
+
+## Debugging on a new machine
+
+1. `git status` / `git log` — confirm latest configs.
+2. If `stow` failed, resolve conflicts in `~/.config` carefully (remember bug #1).
+3. Hyprland / Waybar: `$XDG_RUNTIME_DIR/hypr/*/hyprland.log` or run `waybar` in a terminal.
+4. Confirm packages from `install.sh` (e.g. `swaybg`, fonts) actually installed.
+
+## Git workflow for agents
+
+Unless the user says otherwise: **commit and push** changes made in this repository.
