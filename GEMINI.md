@@ -27,3 +27,6 @@ If the user reports issues on a new machine:
 2. Check if `stow` failed due to existing files. If it did, manually (or carefully) advise the user to remove the conflicting default file in their `~/.config` directory, but remember the lesson from bug #1.
 3. If Hyprland or Waybar is failing, check the logs at `$XDG_RUNTIME_DIR/hypr/*/hyprland.log` or run `waybar` in a terminal to see the output.
 4. Verify that the necessary packages (`swaybg`, fonts, etc.) were successfully installed by `install.sh`.
+
+## Agent Workflow
+- **ALWAYS Commit and Push**: When making changes to any files in this repository, you must automatically commit and push your changes unless explicitly instructed otherwise by the user.
