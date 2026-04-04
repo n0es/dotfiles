@@ -3,9 +3,9 @@
 # --- 1. Essential Packages ---
 PACKAGES="hyprland waybar kitty rofi yazi ranger stow git zsh tmux pipewire wireplumber xdg-desktop-portal-hyprland github-cli"
 
-echo "Installing essential packages..."
+echo "Refreshing package database and installing essential packages..."
 if command -v pacman &> /dev/null; then
-    sudo pacman -S --needed --noconfirm $PACKAGES
+    sudo pacman -Sy --needed --noconfirm $PACKAGES
 fi
 
 # --- 2. Oh My Zsh & Plugins ---
@@ -63,4 +63,11 @@ done
 mkdir -p ~/.config
 stow -v -t ~ $PACKAGES_TO_STOW
 
+# --- 5. Apply Changes ---
+if command -v hyprctl &> /dev/null; then
+    echo "Reloading Hyprland configuration..."
+    hyprctl reload
+fi
+
 echo "Setup complete! Please restart your shell or run 'zsh'."
+
