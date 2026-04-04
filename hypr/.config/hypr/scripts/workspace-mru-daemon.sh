@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Track workspace focus order (MRU) for workspace-mru-menu.sh.
+
+set -euo pipefail
+
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/hypr"
+mru_file="${cache_dir}/workspace_mru"
+mkdir -p "${cache_dir}"
+
+: "${HYPRLAND_INSTANCE_SIGNATURE:?Run under Hyprland (HYPRLAND_INSTANCE_SIGNATURE unset)}"
+socket="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/${HYPRLAND_INSTANCE_SIGNATURE}/.socket2.sock"
+
+prepend_mru() {
+  local id="$1"
+  local rest=""
+
+  [[ -z "${id}" ]] && return 0
+
+  if [[ -f "${mru_file}" ]]; then
+    rest="$(grep -vxF "${id}" "${mru_file}" || true)"
+  fi
+
+  {
+    printf '%s\n' "${id}"
+    printf '%s\n' "${rest}"
+  } | awk 'NF { if (!seen[$0]++) print }' > "${mru_file}.tmp"
+
+  mv "${mru_file}.tmp" "${mru_file}"
+}
+
+seed_active() {
+  local id
+  id="$(hyprctl -j activeworkspace 2>/dev/null | jq -r '.id // empty')" || id=""
+  [[ -n "${id}" ]] && prepend_mru "${id}"
+}
+
+handle_line() {
+  local line="$1"
+
+  case "${line}" in
+    workspacev2\>\>*)
+      local data id
+      data="${line#workspacev2>>}"
+      id="${data%%,*}"
+      prepend_mru "${id}"
+      ;;
+    workspace\>\>*)
+      local name id
+      name="${line#workspace>>}"
+      id="$(hyprctl workspaces -j 2>/dev/null | jq -r --arg n "${name}" '.[] | select(.name == $n) | .id' | head -n 1)"
+      [[ -n "${id}" && "${id}" != "null" ]] && prepend_mru "${id}"
+      ;;
+  esac
+}
+
+if ! command -v socat >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+  exit 0
+fi
+
+seed_active
+
+socat -U - "UNIX-CONNECT:${socket}" | while IFS= read -r line; do
+  handle_line "${line}" || true
+done
