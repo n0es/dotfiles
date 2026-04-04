@@ -39,6 +39,18 @@ install_font "CaskaydiaCove" "https://github.com/ryanoasis/nerd-fonts/releases/l
 fc-cache -fv
 cd -
 
+# --- 3.5. Posy's Cursor Black ---
+CURSOR_DIR="$HOME/.local/share/icons"
+mkdir -p "$CURSOR_DIR"
+if [ ! -d "$CURSOR_DIR/Posy_Cursor_Black" ]; then
+    echo "Installing Posy's Cursor Black..."
+    cd /tmp
+    curl -L "https://github.com/simtrami/posy-improved-cursor-linux/archive/refs/heads/main.tar.gz" | tar -xz
+    cp -r posy-improved-cursor-linux-main/Posy_Cursor_Black "$CURSOR_DIR/"
+    rm -rf posy-improved-cursor-linux-main
+    cd -
+fi
+
 # --- 4. Stow Symlinks ---
 echo "Applying dotfiles with Stow..."
 cd ~/projects/dotfiles
