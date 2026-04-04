@@ -65,8 +65,8 @@ stow -v -t ~ $PACKAGES_TO_STOW
 
 # --- 5. Apply Changes ---
 if command -v hyprctl &> /dev/null; then
-    echo "Reloading Hyprland configuration..."
-    hyprctl reload
+    echo "Forcefully exiting Hyprland to apply all changes..."
+    hyprctl dispatch exit
 fi
 
 echo "Setup complete! Please restart your shell or run 'zsh'."
