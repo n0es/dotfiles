@@ -45,20 +45,6 @@ cd ~/projects/dotfiles
 # List of packages to stow
 PACKAGES_TO_STOW="hypr kitty waybar rofi yazi ranger zsh tmux git wallpapers"
 
-# Cleanup conflicting files before stowing
-# This removes existing files that aren't symlinks so stow can take over
-for pkg in $PACKAGES_TO_STOW; do
-    echo "Preparing $pkg..."
-    # Find all files in the package that would be stowed
-    find "$pkg" -type f | sed "s|^$pkg/||" | while read -r file; do
-        target="$HOME/$file"
-        if [ -f "$target" ] && [ ! -L "$target" ]; then
-            echo "Removing existing file: $target"
-            rm "$target"
-        fi
-    done
-done
-
 # Ensure target directories exist in ~ before stowing
 mkdir -p ~/.config
 stow -v -t ~ $PACKAGES_TO_STOW
