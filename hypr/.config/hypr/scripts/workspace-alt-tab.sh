@@ -3,8 +3,8 @@
 # Shows workspace previews (window layout minimap + workspace number)
 # in a horizontal grid. Accept on Alt release via rofi's ! prefix.
 #
-# Note: hyprctl reload does not re-run exec-once. If you pkill the MRU
-# daemon, it is started again automatically the next time this script runs.
+# Quick-tap (Alt released before rofi opens) is handled by checking evdev
+# key state and switching directly without rofi.
 
 set -euo pipefail
 
@@ -23,7 +23,6 @@ MAX_PREVIEW_JOBS=4
 
 mkdir -p "${CACHE_DIR}" "${PREVIEW_DIR}"
 
-# One switcher at a time (fast Alt+Tab would spawn overlapping runs and break rofi).
 exec 200>"${RUN_LOCK}"
 flock -n 200 || exit 0
 
@@ -31,7 +30,24 @@ command -v hyprctl >/dev/null 2>&1 || exit 1
 command -v jq >/dev/null 2>&1 || exit 1
 command -v rofi >/dev/null 2>&1 || exit 1
 
-# hyprctl reload does not re-run exec-once; restart MRU if it was pkill'd.
+# --- Alt key state via evdev (returns 0=held, 1=released, 0=can't check) ---
+_is_alt_held() {
+  python3 -c "
+import fcntl, array, glob, sys
+checked = False
+for d in sorted(glob.glob('/dev/input/event*')):
+    try:
+        f = open(d, 'rb')
+        b = array.array('B', [0]*96)
+        fcntl.ioctl(f, 0x80604518, b)
+        f.close()
+        checked = True
+        if b[7] & 1 or b[12] & 16: sys.exit(0)
+    except: pass
+sys.exit(0 if not checked else 1)
+" 2>/dev/null
+}
+
 ensure_mru_daemon() {
   [[ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && return 0
   local daemon="${SCRIPT_DIR}/workspace-mru-daemon.sh"
@@ -45,7 +61,8 @@ ensure_mru_daemon
 
 # --- Query Hyprland state (parallel via temp files) ---
 _tmp_ws="$(mktemp)" _tmp_cl="$(mktemp)" _tmp_mon="$(mktemp)"
-trap 'rm -f "${_tmp_ws}" "${_tmp_cl}" "${_tmp_mon}"' EXIT
+_rofi_out="$(mktemp)"
+trap 'rm -f "${_tmp_ws}" "${_tmp_cl}" "${_tmp_mon}" "${_rofi_out}"' EXIT
 (hyprctl -j workspaces 2>/dev/null || echo '[]') > "${_tmp_ws}" &
 (hyprctl -j clients 2>/dev/null || echo '[]') > "${_tmp_cl}" &
 (hyprctl -j monitors 2>/dev/null || echo '[]') > "${_tmp_mon}" &
@@ -54,7 +71,6 @@ ws_json="$(<"${_tmp_ws}")"
 clients_json="$(<"${_tmp_cl}")"
 monitors_json="$(<"${_tmp_mon}")"
 
-# Focused monitor for aspect ratio
 mon_w="$(echo "${monitors_json}" | jq '[.[] | select(.focused)] | .[0].width // 1920')"
 mon_h="$(echo "${monitors_json}" | jq '[.[] | select(.focused)] | .[0].height // 1080')"
 PREVIEW_H=$(( PREVIEW_W * mon_h / mon_w ))
@@ -62,7 +78,7 @@ PREVIEW_H=$(( PREVIEW_W * mon_h / mon_w ))
 mapfile -t all_ids < <(echo "${ws_json}" | jq -r '.[] | select(.id > 0) | .id | tostring' | sort -n)
 (( ${#all_ids[@]} <= 1 )) && exit 0
 
-# --- Order: current workspace first, then MRU (previous, then older), then rest by id ---
+# --- MRU ordering ---
 active_id="$(echo "${monitors_json}" | jq -r '[.[] | select(.focused == true)] | .[0].activeWorkspace.id // empty')"
 if [[ -z "${active_id}" || "${active_id}" == "null" ]]; then
   active_id="$(hyprctl -j activeworkspace 2>/dev/null | jq -r '.id // empty')"
@@ -115,7 +131,18 @@ for id in "${all_ids[@]}"; do
   seen["${id}"]=1
 done
 
-# --- Precompute maps (one jq each) ---
+# --- Quick-tap: Alt already released → switch to previous workspace, skip rofi ---
+if ! _is_alt_held; then
+  prev_id="${ordered_ids[1]:-}"
+  if [[ -n "${prev_id}" ]]; then
+    hyprctl dispatch focusworkspaceoncurrentmonitor "${prev_id}" >/dev/null 2>&1 || true
+    prepend_mru_atomic "${CACHE_DIR}" "${prev_id}"
+  fi
+  exit 0
+fi
+
+# --- Alt is held: generate previews then show rofi ---
+
 mon_map="$(echo "${monitors_json}" | jq -c '[.[] | {(.name): {x: .x, y: .y}}] | add // {}')"
 ws_mon_map="$(echo "${ws_json}" | jq -c '[.[] | select(.id > 0) | {(.id | tostring): .monitor}] | add // {}')"
 rects_by_ws="$(
@@ -130,12 +157,6 @@ rects_by_ws="$(
 MAGICK=""
 command -v magick >/dev/null 2>&1 && MAGICK="magick"
 [[ -z "${MAGICK}" ]] && command -v convert >/dev/null 2>&1 && MAGICK="convert"
-
-preview_signature() {
-  local id="$1" win_json="$2" mx="$3" my="$4"
-  printf '%s|%s|%s|%s|%s|%s|%s' "${win_json}" "${mx}" "${my}" "${mon_w}" "${mon_h}" "${PREVIEW_W}" "${PREVIEW_H}" \
-    | sha256sum | awk '{print $1}'
-}
 
 generate_preview_magick() {
   local ws_id="$1" win_json="$2" mx="$3" my="$4" preview_path="$5"
@@ -172,6 +193,12 @@ generate_preview_magick() {
     "${preview_path}" 2>/dev/null
 }
 
+preview_signature() {
+  local id="$1" win_json="$2" mx="$3" my="$4"
+  printf '%s|%s|%s|%s|%s|%s|%s' "${win_json}" "${mx}" "${my}" "${mon_w}" "${mon_h}" "${PREVIEW_W}" "${PREVIEW_H}" \
+    | sha256sum | awk '{print $1}'
+}
+
 _run_one_preview() {
   local id="$1" win_json="$2" mx="$3" my="$4"
   local preview_path="${PREVIEW_DIR}/ws_${id}.png"
@@ -201,14 +228,14 @@ for id in "${ordered_ids[@]}"; do
   fi
   win_json="$(jq -c --arg i "${id}" '.[$i] // []' <<< "${rects_by_ws}")"
   while (( ${#preview_pids[@]} >= MAX_PREVIEW_JOBS )); do
-    wait "${preview_pids[0]}"
+    wait "${preview_pids[0]}" 2>/dev/null || true
     preview_pids=("${preview_pids[@]:1}")
   done
   _run_one_preview "${id}" "${win_json}" "${mx}" "${my}" &
   preview_pids+=("$!")
 done
 for pid in "${preview_pids[@]}"; do
-  wait "${pid}"
+  wait "${pid}" 2>/dev/null || true
 done
 
 # --- Build rofi input ---
@@ -228,7 +255,8 @@ columns="${MAX_COLUMNS}"
 (( num_ws < columns )) && columns="${num_ws}"
 lines=$(( (num_ws + columns - 1) / columns ))
 
-selected_name="$(
+# --- Launch rofi with Alt-release watchdog ---
+(
   for line in "${rofi_lines[@]}"; do
     printf '%b\n' "${line}"
   done | rofi -dmenu \
@@ -246,8 +274,30 @@ selected_name="$(
     -kb-row-tab '' \
     -p '' \
     -theme-str "listview { columns: ${columns}; lines: ${lines}; } element-icon { size: ${PREVIEW_W}px ${PREVIEW_H}px; }"
-)" || exit 0
+) > "${_rofi_out}" &
+ROFI_PID=$!
 
+# If Alt is released during rofi startup (before rofi grabs keyboard),
+# rofi will sit waiting. Watchdog detects this and sends Return to accept.
+if command -v wtype >/dev/null 2>&1; then
+  (
+    sleep 0.25
+    while kill -0 "${ROFI_PID}" 2>/dev/null; do
+      if ! _is_alt_held; then
+        sleep 0.05
+        kill -0 "${ROFI_PID}" 2>/dev/null && wtype -k Return 2>/dev/null || true
+        break
+      fi
+      sleep 0.08
+    done
+  ) &
+  WATCH_PID=$!
+fi
+
+wait "${ROFI_PID}" || true
+[[ -n "${WATCH_PID:-}" ]] && { kill "${WATCH_PID}" 2>/dev/null || true; wait "${WATCH_PID}" 2>/dev/null || true; }
+
+selected_name="$(<"${_rofi_out}")"
 [[ -z "${selected_name}" ]] && exit 0
 
 selected_id="$(echo "${ws_json}" | jq -r --arg name "${selected_name}" \
