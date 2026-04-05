@@ -223,7 +223,7 @@ if command -v wtype >/dev/null 2>&1; then
   (
     sleep 0.3
     kill -0 "${ROFI_PID}" 2>/dev/null || exit 0
-    wtype -M alt -s 30 -m alt 2>/dev/null || true
+    wtype -P Alt_L -s 30 -p Alt_L 2>/dev/null || true
   ) &
   WATCH_PID=$!
 fi
