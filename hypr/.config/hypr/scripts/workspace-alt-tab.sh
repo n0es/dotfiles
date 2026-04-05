@@ -202,13 +202,14 @@ if command -v wtype >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
     while kill -0 "${ROFI_PID}" 2>/dev/null; do
       if python3 -c "
 import fcntl, array, glob, sys
+ok = False
 for d in sorted(glob.glob('/dev/input/event*')):
     try:
         f = open(d, 'rb'); b = array.array('B', [0]*96)
-        fcntl.ioctl(f, 0x80604518, b); f.close()
+        fcntl.ioctl(f, 0x80604518, b); f.close(); ok = True
         if b[7] & 1 or b[12] & 16: sys.exit(0)
     except: pass
-sys.exit(1)
+sys.exit(0 if not ok else 1)
 " 2>/dev/null; then
         sleep 0.05
       else
