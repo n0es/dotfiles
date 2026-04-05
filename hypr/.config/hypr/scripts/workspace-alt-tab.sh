@@ -43,28 +43,27 @@ ensure_mru_daemon() {
 
 ensure_mru_daemon
 
-# --- Query Hyprland state (parallel hyprctl) ---
-ws_json="" clients_json="" monitors_json=""
-ws_json="$(hyprctl -j workspaces 2>/dev/null || echo '[]')" &
-clients_json="$(hyprctl -j clients 2>/dev/null || echo '[]')" &
-monitors_json="$(hyprctl -j monitors 2>/dev/null || echo '[]')" &
-wait || true
+# --- Query Hyprland state (parallel via temp files) ---
+_tmp_ws="$(mktemp)" _tmp_cl="$(mktemp)" _tmp_mon="$(mktemp)"
+trap 'rm -f "${_tmp_ws}" "${_tmp_cl}" "${_tmp_mon}"' EXIT
+(hyprctl -j workspaces 2>/dev/null || echo '[]') > "${_tmp_ws}" &
+(hyprctl -j clients 2>/dev/null || echo '[]') > "${_tmp_cl}" &
+(hyprctl -j monitors 2>/dev/null || echo '[]') > "${_tmp_mon}" &
+wait
+ws_json="$(<"${_tmp_ws}")"
+clients_json="$(<"${_tmp_cl}")"
+monitors_json="$(<"${_tmp_mon}")"
 
-# Focused monitor for aspect ratio (always valid JSON so jq never sees an empty stdin)
-_focused_mon="$(
-  echo "${monitors_json}" | jq -c '[.[] | select(.focused == true)][0] // null' 2>/dev/null || echo 'null'
-)"
-mon_w="$(echo "${_focused_mon}" | jq -r 'if type == "object" then (.width // 1920) else 1920 end')"
-mon_h="$(echo "${_focused_mon}" | jq -r 'if type == "object" then (.height // 1080) else 1080 end')"
-(( mon_w < 1 )) && mon_w=1
-(( mon_h < 1 )) && mon_h=1
+# Focused monitor for aspect ratio
+mon_w="$(echo "${monitors_json}" | jq '[.[] | select(.focused)] | .[0].width // 1920')"
+mon_h="$(echo "${monitors_json}" | jq '[.[] | select(.focused)] | .[0].height // 1080')"
 PREVIEW_H=$(( PREVIEW_W * mon_h / mon_w ))
 
 mapfile -t all_ids < <(echo "${ws_json}" | jq -r '.[] | select(.id > 0) | .id | tostring' | sort -n)
 (( ${#all_ids[@]} <= 1 )) && exit 0
 
 # --- Order: current workspace first, then MRU (previous, then older), then rest by id ---
-active_id="$(echo "${_focused_mon}" | jq -r 'if type == "object" then (.activeWorkspace // {}) | .id // empty else empty end')"
+active_id="$(echo "${monitors_json}" | jq -r '[.[] | select(.focused == true)] | .[0].activeWorkspace.id // empty')"
 if [[ -z "${active_id}" || "${active_id}" == "null" ]]; then
   active_id="$(hyprctl -j activeworkspace 2>/dev/null | jq -r '.id // empty')"
 fi
@@ -117,15 +116,15 @@ for id in "${all_ids[@]}"; do
 done
 
 # --- Precompute maps (one jq each) ---
-mon_map="$(echo "${monitors_json}" | jq -c '[.[] | {(.name): {x: .x, y: .y}}] | add // {}' 2>/dev/null || echo '{}')"
-ws_mon_map="$(echo "${ws_json}" | jq -c '[.[] | select(.id > 0) | {(.id | tostring): .monitor}] | add // {}' 2>/dev/null || echo '{}')"
+mon_map="$(echo "${monitors_json}" | jq -c '[.[] | {(.name): {x: .x, y: .y}}] | add // {}')"
+ws_mon_map="$(echo "${ws_json}" | jq -c '[.[] | select(.id > 0) | {(.id | tostring): .monitor}] | add // {}')"
 rects_by_ws="$(
   echo "${clients_json}" | jq -c '
     [ .[] | select(.mapped and (.hidden | not) and (.workspace.id > 0)) ]
     | group_by(.workspace.id)
     | map({ (.[0].workspace.id | tostring): map([.at[0], .at[1], .size[0], .size[1]]) })
     | add // {}
-  ' 2>/dev/null || echo '{}'
+  '
 )"
 
 MAGICK=""
@@ -144,12 +143,12 @@ generate_preview_magick() {
   [[ -z "${MAGICK}" ]] && return 0
 
   local win_count
-  win_count="$(jq 'length' <<< "${win_json}" 2>/dev/null || echo 0)"
+  win_count="$(jq 'length' <<< "${win_json}")"
 
   local -a draw_cmds=()
   local i wx wy ww wh rx1 ry1 rx2 ry2
   for (( i=0; i<win_count; i++ )); do
-    read -r wx wy ww wh < <(jq -r --argjson i "${i}" '.[$i] | "\(.[0]) \(.[1]) \(.[2]) \(.[3])"' <<< "${win_json}" 2>/dev/null || echo "0 0 0 0")
+    read -r wx wy ww wh < <(jq -r --argjson i "${i}" '.[$i] | "\(.[0]) \(.[1]) \(.[2]) \(.[3])"' <<< "${win_json}")
     wx=$(( wx - mx ))
     wy=$(( wy - my ))
     rx1=$(( wx * PREVIEW_W / mon_w + 2 ))
@@ -185,11 +184,10 @@ _run_one_preview() {
   fi
   printf '%s' "${sig}" > "${sig_path}.tmp"
   if generate_preview_magick "${id}" "${win_json}" "${mx}" "${my}" "${preview_path}"; then
-    mv "${sig_path}.tmp" "${sig_path}" 2>/dev/null || true
+    mv "${sig_path}.tmp" "${sig_path}"
   else
     rm -f "${sig_path}.tmp"
   fi
-  return 0
 }
 
 preview_pids=()
@@ -203,14 +201,14 @@ for id in "${ordered_ids[@]}"; do
   fi
   win_json="$(jq -c --arg i "${id}" '.[$i] // []' <<< "${rects_by_ws}")"
   while (( ${#preview_pids[@]} >= MAX_PREVIEW_JOBS )); do
-    wait "${preview_pids[0]}" || true
+    wait "${preview_pids[0]}"
     preview_pids=("${preview_pids[@]:1}")
   done
   _run_one_preview "${id}" "${win_json}" "${mx}" "${my}" &
   preview_pids+=("$!")
 done
 for pid in "${preview_pids[@]}"; do
-  wait "${pid}" || true
+  wait "${pid}"
 done
 
 # --- Build rofi input ---
