@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Track workspace focus order (MRU) for workspace-mru-menu.sh.
+# Track workspace focus order (MRU) for workspace-alt-tab.sh.
+# Uses only workspacev2 (Hyprland ≥0.37): the legacy workspace>> event
+# can also fire on the same switch and duplicate prepend_mru with wrong order.
 
 set -euo pipefail
 
@@ -14,10 +16,15 @@ prepend_mru() {
   local id="$1"
   local rest=""
 
+  id="${id//$'\r'/}"
+  id="${id#"${id%%[![:space:]]*}"}"
+  id="${id%"${id##*[![:space:]]}"}"
+
   [[ -z "${id}" ]] && return 0
 
   if [[ -f "${mru_file}" ]]; then
     rest="$(grep -vxF "${id}" "${mru_file}" || true)"
+    rest="${rest//$'\r'/}"
   fi
 
   {
@@ -36,19 +43,16 @@ seed_active() {
 
 handle_line() {
   local line="$1"
+  line="${line//$'\r'/}"
 
   case "${line}" in
     workspacev2\>\>*)
       local data id
       data="${line#workspacev2>>}"
       id="${data%%,*}"
+      id="${id#"${id%%[![:space:]]*}"}"
+      id="${id%"${id##*[![:space:]]}"}"
       prepend_mru "${id}"
-      ;;
-    workspace\>\>*)
-      local name id
-      name="${line#workspace>>}"
-      id="$(hyprctl workspaces -j 2>/dev/null | jq -r --arg n "${name}" '.[] | select(.name == $n) | .id' | head -n 1)"
-      [[ -n "${id}" && "${id}" != "null" ]] && prepend_mru "${id}"
       ;;
   esac
 }

@@ -35,7 +35,12 @@ mapfile -t all_ids < <(echo "${ws_json}" | jq -r '.[] | select(.id > 0) | .id | 
 
 # --- Order: current workspace first, then MRU (previous, then older), then rest by id ---
 active_id="$(hyprctl -j activeworkspace 2>/dev/null | jq -r '.id // empty')"
+active_id="${active_id//$'\r'/}"
 [[ -z "${active_id}" || "${active_id}" == "null" ]] && active_id=""
+if [[ -n "${active_id}" ]]; then
+  active_id="${active_id#"${active_id%%[![:space:]]*}"}"
+  active_id="${active_id%"${active_id##*[![:space:]]}"}"
+fi
 
 declare -A ws_exists=()
 for id in "${all_ids[@]}"; do ws_exists["${id}"]=1; done
@@ -50,6 +55,9 @@ fi
 
 if [[ -f "${MRU_FILE}" ]]; then
   while IFS= read -r id; do
+    id="${id//$'\r'/}"
+    id="${id#"${id%%[![:space:]]*}"}"
+    id="${id%"${id##*[![:space:]]}"}"
     [[ -z "${id}" ]] && continue
     [[ -n "${ws_exists[${id}]+x}" && -z "${seen[${id}]+x}" ]] || continue
     ordered_ids+=("${id}")
