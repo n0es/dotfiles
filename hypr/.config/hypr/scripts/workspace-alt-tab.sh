@@ -3,8 +3,10 @@
 # Shows workspace previews (window layout minimap + workspace number)
 # in a horizontal grid. Accept on Alt release via rofi's ! prefix.
 #
-# Quick-tap (Alt released before rofi opens) is handled by checking evdev
-# key state and switching directly without rofi.
+# Quick-tap handling: a wtype watchdog sends a synthetic Alt press+release
+# after rofi starts. If Alt was already released, this triggers rofi's
+# !Alt_L accept. If Alt is still physically held, wlroots merges key state
+# across devices so Alt stays pressed until the real release.
 
 set -euo pipefail
 
@@ -30,38 +32,16 @@ command -v hyprctl >/dev/null 2>&1 || exit 1
 command -v jq >/dev/null 2>&1 || exit 1
 command -v rofi >/dev/null 2>&1 || exit 1
 
-# --- Alt key state via evdev (returns 0=held, 1=released, 0=can't check) ---
-_is_alt_held() {
-  python3 -c "
-import fcntl, array, glob, sys
-checked = False
-for d in sorted(glob.glob('/dev/input/event*')):
-    try:
-        f = open(d, 'rb')
-        b = array.array('B', [0]*96)
-        fcntl.ioctl(f, 0x80604518, b)
-        f.close()
-        checked = True
-        if b[7] & 1 or b[12] & 16: sys.exit(0)
-    except: pass
-sys.exit(0 if not checked else 1)
-" 2>/dev/null
-}
-
 ensure_mru_daemon() {
   [[ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && return 0
   local daemon="${SCRIPT_DIR}/workspace-mru-daemon.sh"
   [[ -f "${daemon}" ]] || return 0
-  if ! pgrep -f "workspace-mru-daemon\.sh" >/dev/null 2>&1; then
-    "${daemon}" >/dev/null 2>&1 &
-  fi
+  pgrep -f "workspace-mru-daemon\.sh" >/dev/null 2>&1 || "${daemon}" >/dev/null 2>&1 &
 }
-
 ensure_mru_daemon
 
-# --- Query Hyprland state (parallel via temp files) ---
-_tmp_ws="$(mktemp)" _tmp_cl="$(mktemp)" _tmp_mon="$(mktemp)"
-_rofi_out="$(mktemp)"
+# --- Query Hyprland state ---
+_tmp_ws="$(mktemp)" _tmp_cl="$(mktemp)" _tmp_mon="$(mktemp)" _rofi_out="$(mktemp)"
 trap 'rm -f "${_tmp_ws}" "${_tmp_cl}" "${_tmp_mon}" "${_rofi_out}"' EXIT
 (hyprctl -j workspaces 2>/dev/null || echo '[]') > "${_tmp_ws}" &
 (hyprctl -j clients 2>/dev/null || echo '[]') > "${_tmp_cl}" &
@@ -85,21 +65,12 @@ if [[ -z "${active_id}" || "${active_id}" == "null" ]]; then
 fi
 active_id="${active_id//$'\r'/}"
 [[ -z "${active_id}" || "${active_id}" == "null" ]] && active_id=""
-if [[ -n "${active_id}" ]]; then
-  active_id="${active_id#"${active_id%%[![:space:]]*}"}"
-  active_id="${active_id%"${active_id##*[![:space:]]}"}"
-fi
+active_id="${active_id#"${active_id%%[![:space:]]*}"}"
+active_id="${active_id%"${active_id##*[![:space:]]}"}"
 
-if [[ -n "${active_id}" ]]; then
-  first_in_mru=""
-  if [[ -f "${MRU_FILE}" ]]; then
-    first_in_mru="$(head -n1 "${MRU_FILE}" | tr -d '\r')"
-    first_in_mru="${first_in_mru#"${first_in_mru%%[![:space:]]*}"}"
-    first_in_mru="${first_in_mru%"${first_in_mru##*[![:space:]]}"}"
-  fi
-  if [[ "${first_in_mru}" != "${active_id}" ]]; then
-    prepend_mru_atomic "${CACHE_DIR}" "${active_id}"
-  fi
+if [[ -n "${active_id}" && -f "${MRU_FILE}" ]]; then
+  first_in_mru="$(head -n1 "${MRU_FILE}" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  [[ "${first_in_mru}" != "${active_id}" ]] && prepend_mru_atomic "${CACHE_DIR}" "${active_id}"
 fi
 
 declare -A ws_exists=()
@@ -131,28 +102,15 @@ for id in "${all_ids[@]}"; do
   seen["${id}"]=1
 done
 
-# --- Quick-tap: Alt already released → switch to previous workspace, skip rofi ---
-if ! _is_alt_held; then
-  prev_id="${ordered_ids[1]:-}"
-  if [[ -n "${prev_id}" ]]; then
-    hyprctl dispatch focusworkspaceoncurrentmonitor "${prev_id}" >/dev/null 2>&1 || true
-    prepend_mru_atomic "${CACHE_DIR}" "${prev_id}"
-  fi
-  exit 0
-fi
-
-# --- Alt is held: generate previews then show rofi ---
-
+# --- Preview generation ---
 mon_map="$(echo "${monitors_json}" | jq -c '[.[] | {(.name): {x: .x, y: .y}}] | add // {}')"
 ws_mon_map="$(echo "${ws_json}" | jq -c '[.[] | select(.id > 0) | {(.id | tostring): .monitor}] | add // {}')"
-rects_by_ws="$(
-  echo "${clients_json}" | jq -c '
-    [ .[] | select(.mapped and (.hidden | not) and (.workspace.id > 0)) ]
-    | group_by(.workspace.id)
-    | map({ (.[0].workspace.id | tostring): map([.at[0], .at[1], .size[0], .size[1]]) })
-    | add // {}
-  '
-)"
+rects_by_ws="$(echo "${clients_json}" | jq -c '
+  [ .[] | select(.mapped and (.hidden | not) and (.workspace.id > 0)) ]
+  | group_by(.workspace.id)
+  | map({ (.[0].workspace.id | tostring): map([.at[0], .at[1], .size[0], .size[1]]) })
+  | add // {}
+')"
 
 MAGICK=""
 command -v magick >/dev/null 2>&1 && MAGICK="magick"
@@ -160,7 +118,6 @@ command -v magick >/dev/null 2>&1 && MAGICK="magick"
 
 generate_preview_magick() {
   local ws_id="$1" win_json="$2" mx="$3" my="$4" preview_path="$5"
-
   [[ -z "${MAGICK}" ]] && return 0
 
   local win_count
@@ -170,14 +127,10 @@ generate_preview_magick() {
   local i wx wy ww wh rx1 ry1 rx2 ry2
   for (( i=0; i<win_count; i++ )); do
     read -r wx wy ww wh < <(jq -r --argjson i "${i}" '.[$i] | "\(.[0]) \(.[1]) \(.[2]) \(.[3])"' <<< "${win_json}")
-    wx=$(( wx - mx ))
-    wy=$(( wy - my ))
-    rx1=$(( wx * PREVIEW_W / mon_w + 2 ))
-    ry1=$(( wy * PREVIEW_H / mon_h + 2 ))
-    rx2=$(( (wx + ww) * PREVIEW_W / mon_w + 2 ))
-    ry2=$(( (wy + wh) * PREVIEW_H / mon_h + 2 ))
-    (( rx1 < 2 )) && rx1=2
-    (( ry1 < 2 )) && ry1=2
+    wx=$(( wx - mx )); wy=$(( wy - my ))
+    rx1=$(( wx * PREVIEW_W / mon_w + 2 )); ry1=$(( wy * PREVIEW_H / mon_h + 2 ))
+    rx2=$(( (wx + ww) * PREVIEW_W / mon_w + 2 )); ry2=$(( (wy + wh) * PREVIEW_H / mon_h + 2 ))
+    (( rx1 < 2 )) && rx1=2; (( ry1 < 2 )) && ry1=2
     (( rx2 >= PREVIEW_W - 2 )) && rx2=$(( PREVIEW_W - 3 ))
     (( ry2 >= PREVIEW_H - 2 )) && ry2=$(( PREVIEW_H - 3 ))
     draw_cmds+=(-fill "#3d4555" -stroke "#5e6779" -strokewidth 1 \
@@ -194,38 +147,31 @@ generate_preview_magick() {
 }
 
 preview_signature() {
-  local id="$1" win_json="$2" mx="$3" my="$4"
-  printf '%s|%s|%s|%s|%s|%s|%s' "${win_json}" "${mx}" "${my}" "${mon_w}" "${mon_h}" "${PREVIEW_W}" "${PREVIEW_H}" \
+  printf '%s|%s|%s|%s|%s|%s' "$2" "$3" "$4" "${mon_w}" "${mon_h}" "${PREVIEW_W}" \
     | sha256sum | awk '{print $1}'
 }
 
 _run_one_preview() {
   local id="$1" win_json="$2" mx="$3" my="$4"
-  local preview_path="${PREVIEW_DIR}/ws_${id}.png"
-  local sig_path="${PREVIEW_DIR}/ws_${id}.sig"
-  local sig
+  local pp="${PREVIEW_DIR}/ws_${id}.png" sp="${PREVIEW_DIR}/ws_${id}.sig"
   [[ -z "${MAGICK}" ]] && return 0
-  sig="$(preview_signature "${id}" "${win_json}" "${mx}" "${my}")"
-  if [[ -f "${preview_path}" && -f "${sig_path}" && "$(<"${sig_path}")" == "${sig}" ]]; then
-    return 0
-  fi
-  printf '%s' "${sig}" > "${sig_path}.tmp"
-  if generate_preview_magick "${id}" "${win_json}" "${mx}" "${my}" "${preview_path}"; then
-    mv "${sig_path}.tmp" "${sig_path}"
+  local sig; sig="$(preview_signature "${id}" "${win_json}" "${mx}" "${my}")"
+  [[ -f "${pp}" && -f "${sp}" && "$(<"${sp}")" == "${sig}" ]] && return 0
+  printf '%s' "${sig}" > "${sp}.tmp"
+  if generate_preview_magick "${id}" "${win_json}" "${mx}" "${my}" "${pp}"; then
+    mv "${sp}.tmp" "${sp}"
   else
-    rm -f "${sig_path}.tmp"
+    rm -f "${sp}.tmp"
   fi
 }
 
 preview_pids=()
 for id in "${ordered_ids[@]}"; do
   ws_mon="$(jq -r --arg i "${id}" '.[$i] // ""' <<< "${ws_mon_map}")"
-  if [[ -z "${ws_mon}" ]]; then
-    mx=0 my=0
-  else
+  if [[ -n "${ws_mon}" ]]; then
     mx="$(jq -r --arg m "${ws_mon}" '.[$m].x // 0' <<< "${mon_map}")"
     my="$(jq -r --arg m "${ws_mon}" '.[$m].y // 0' <<< "${mon_map}")"
-  fi
+  else mx=0 my=0; fi
   win_json="$(jq -c --arg i "${id}" '.[$i] // []' <<< "${rects_by_ws}")"
   while (( ${#preview_pids[@]} >= MAX_PREVIEW_JOBS )); do
     wait "${preview_pids[0]}" 2>/dev/null || true
@@ -234,20 +180,14 @@ for id in "${ordered_ids[@]}"; do
   _run_one_preview "${id}" "${win_json}" "${mx}" "${my}" &
   preview_pids+=("$!")
 done
-for pid in "${preview_pids[@]}"; do
-  wait "${pid}" 2>/dev/null || true
-done
+for pid in "${preview_pids[@]}"; do wait "${pid}" 2>/dev/null || true; done
 
 # --- Build rofi input ---
 rofi_lines=()
 for id in "${ordered_ids[@]}"; do
   ws_name="$(echo "${ws_json}" | jq -r --argjson id "${id}" '.[] | select(.id == $id) | .name')"
   preview="${PREVIEW_DIR}/ws_${id}.png"
-  if [[ -f "${preview}" ]]; then
-    rofi_lines+=("${ws_name}\0icon\x1f${preview}")
-  else
-    rofi_lines+=("${ws_name}")
-  fi
+  [[ -f "${preview}" ]] && rofi_lines+=("${ws_name}\0icon\x1f${preview}") || rofi_lines+=("${ws_name}")
 done
 
 num_ws="${#ordered_ids[@]}"
@@ -255,11 +195,9 @@ columns="${MAX_COLUMNS}"
 (( num_ws < columns )) && columns="${num_ws}"
 lines=$(( (num_ws + columns - 1) / columns ))
 
-# --- Launch rofi with Alt-release watchdog ---
+# --- Launch rofi ---
 (
-  for line in "${rofi_lines[@]}"; do
-    printf '%b\n' "${line}"
-  done | rofi -dmenu \
+  for line in "${rofi_lines[@]}"; do printf '%b\n' "${line}"; done | rofi -dmenu \
     -theme "${THEME}" \
     -show-icons \
     -selected-row 1 \
@@ -277,25 +215,21 @@ lines=$(( (num_ws + columns - 1) / columns ))
 ) > "${_rofi_out}" &
 ROFI_PID=$!
 
-# If Alt is released during rofi startup (before rofi grabs keyboard),
-# rofi will sit waiting. Watchdog detects this and sends Return to accept.
+# Watchdog: send synthetic Alt press+release after rofi grabs keyboard.
+# If Alt was already released (quick-tap), rofi sees a press then release → !Alt_L fires → accept.
+# If Alt is still physically held, wlroots merges key state across devices,
+# so Alt stays pressed until the real physical release.
 if command -v wtype >/dev/null 2>&1; then
   (
-    sleep 0.25
-    while kill -0 "${ROFI_PID}" 2>/dev/null; do
-      if ! _is_alt_held; then
-        sleep 0.05
-        kill -0 "${ROFI_PID}" 2>/dev/null && wtype -k Return 2>/dev/null || true
-        break
-      fi
-      sleep 0.08
-    done
+    sleep 0.3
+    kill -0 "${ROFI_PID}" 2>/dev/null || exit 0
+    wtype -M alt -s 30 -m alt 2>/dev/null || true
   ) &
   WATCH_PID=$!
 fi
 
 wait "${ROFI_PID}" || true
-[[ -n "${WATCH_PID:-}" ]] && { kill "${WATCH_PID}" 2>/dev/null || true; wait "${WATCH_PID}" 2>/dev/null || true; }
+[[ -n "${WATCH_PID:-}" ]] && { kill "${WATCH_PID}" 2>/dev/null; wait "${WATCH_PID}" 2>/dev/null; } || true
 
 selected_name="$(<"${_rofi_out}")"
 [[ -z "${selected_name}" ]] && exit 0
