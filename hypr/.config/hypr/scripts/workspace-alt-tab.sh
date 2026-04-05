@@ -12,11 +12,11 @@ STATE_FILE="${STATE_DIR}/workspace_alt_tab_state.json"
 MRU_FILE="${STATE_DIR}/workspace_mru"
 mkdir -p "${STATE_DIR}"
 
-NOTIFY_ICON="-1"
+NOTIFY_ICON="1"
 NOTIFY_TIME="12000"
-NOTIFY_COLOR="rgb(89b4fa)"
+NOTIFY_COLOR="0"
 
-command="${1:-}"
+action="${1:-}"
 direction="${2:-next}"
 
 require_tools() {
@@ -28,13 +28,22 @@ dismiss_ui() {
   hyprctl dismissnotify 20 >/dev/null 2>&1 || true
 }
 
-get_monitor_under_cursor() {
-  local monitors cursor cx cy monitor
-  monitors="$(hyprctl -j monitors all 2>/dev/null || hyprctl -j monitors 2>/dev/null || echo '[]')"
-  cursor="$(hyprctl -j cursorpos 2>/dev/null || echo '{}')"
+show_notification() {
+  local text="$1"
+  if ! hyprctl notify "${NOTIFY_ICON}" "${NOTIFY_TIME}" "${NOTIFY_COLOR}" "${text}" >/dev/null 2>&1; then
+    if command -v notify-send >/dev/null 2>&1; then
+      notify-send "Workspace switcher" "${text}" >/dev/null 2>&1 || true
+    fi
+  fi
+}
 
-  cx="$(echo "${cursor}" | jq -r '.x // empty')"
-  cy="$(echo "${cursor}" | jq -r '.y // empty')"
+get_monitor_under_cursor() {
+  local monitors cursor_raw cx cy monitor
+  monitors="$(hyprctl -j monitors all 2>/dev/null || hyprctl -j monitors 2>/dev/null || echo '[]')"
+  cursor_raw="$(hyprctl -j cursorpos 2>/dev/null || echo '{}')"
+
+  cx="$(echo "${cursor_raw}" | jq -r '.x // empty' 2>/dev/null || true)"
+  cy="$(echo "${cursor_raw}" | jq -r '.y // empty' 2>/dev/null || true)"
 
   if [[ -n "${cx}" && -n "${cy}" ]]; then
     monitor="$(
@@ -42,7 +51,7 @@ get_monitor_under_cursor() {
         .[]
         | select($x >= .x and $x < (.x + .width) and $y >= .y and $y < (.y + .height))
         | .name
-      ' | head -n 1
+      ' 2>/dev/null | head -n 1
     )"
     if [[ -n "${monitor}" ]]; then
       printf '%s\n' "${monitor}"
@@ -71,7 +80,7 @@ order_ids_with_mru() {
   local -n out_names_ref="$3"
   local id name line
   local -a ids_sorted=()
-  local -a ordered_ids=()
+  local -a ordered_ids_local=()
   declare -A names_by_id=()
   declare -A seen=()
 
@@ -85,7 +94,7 @@ order_ids_with_mru() {
     while IFS= read -r id; do
       [[ -z "${id}" ]] && continue
       if [[ -n "${names_by_id[${id}]+x}" && -z "${seen[${id}]+x}" ]]; then
-        ordered_ids+=("${id}")
+        ordered_ids_local+=("${id}")
         seen["${id}"]=1
       fi
     done < "${MRU_FILE}"
@@ -93,14 +102,14 @@ order_ids_with_mru() {
 
   for id in "${ids_sorted[@]}"; do
     if [[ -z "${seen[${id}]+x}" ]]; then
-      ordered_ids+=("${id}")
+      ordered_ids_local+=("${id}")
       seen["${id}"]=1
     fi
   done
 
   out_ids_ref=()
   out_names_ref=()
-  for id in "${ordered_ids[@]}"; do
+  for id in "${ordered_ids_local[@]}"; do
     out_ids_ref+=("${id}")
     out_names_ref+=("${names_by_id[${id}]}")
   done
@@ -149,8 +158,7 @@ show_state_ui() {
 
   dismiss_ui
   msg="$(printf 'Workspaces (%s)\n%s\n\nTab/Shift+Tab to cycle, release Alt to switch' "${monitor}" "$(printf '%s\n' "${lines[@]}")")"
-  hyprctl notify "${NOTIFY_ICON}" "${NOTIFY_TIME}" "${NOTIFY_COLOR}" \
-    "${msg}" >/dev/null 2>&1 || true
+  show_notification "${msg}"
 }
 
 read_state_or_exit() {
@@ -177,13 +185,19 @@ start_session() {
   local ids_json names_json count idx=-1 i initial
 
   monitor="$(get_monitor_under_cursor)"
-  [[ -z "${monitor}" ]] && exit 0
+  if [[ -z "${monitor}" ]]; then
+    show_notification "Could not determine monitor for workspace switch."
+    exit 0
+  fi
 
   ws_array_json="$(load_monitor_workspaces "${monitor}")"
   order_ids_with_mru "${ws_array_json}" ordered_ids ordered_names
 
   count="${#ordered_ids[@]}"
-  [[ "${count}" -eq 0 ]] && exit 0
+  if [[ "${count}" -eq 0 ]]; then
+    show_notification "No workspaces found on monitor ${monitor}."
+    exit 0
+  fi
 
   active_id="$(active_workspace_id_for_monitor "${monitor}")"
   for (( i=0; i<count; i++ )); do
@@ -236,7 +250,7 @@ cancel_session() {
 
 require_tools
 
-case "${command}" in
+case "${action}" in
   start)
     start_session "${direction}"
     ;;
