@@ -193,11 +193,30 @@ lines=$(( (num_ws + columns - 1) / columns ))
 ) > "${_rofi_out}" &
 ROFI_PID=$!
 
-if command -v wtype >/dev/null 2>&1; then
+# Watchdog: poll evdev for Alt release, then send Return to accept.
+# Requires read access to /dev/input/ (user must be in 'input' group,
+# or run: sudo setfacl -m u:$USER:r /dev/input/event*).
+if command -v wtype >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
   (
-    sleep 0.3
-    kill -0 "${ROFI_PID}" 2>/dev/null || exit 0
-    wtype -P Alt_L -s 30 -p Alt_L 2>/dev/null || true
+    sleep 0.15
+    while kill -0 "${ROFI_PID}" 2>/dev/null; do
+      if python3 -c "
+import fcntl, array, glob, sys
+for d in sorted(glob.glob('/dev/input/event*')):
+    try:
+        f = open(d, 'rb'); b = array.array('B', [0]*96)
+        fcntl.ioctl(f, 0x80604518, b); f.close()
+        if b[7] & 1 or b[12] & 16: sys.exit(0)
+    except: pass
+sys.exit(1)
+" 2>/dev/null; then
+        sleep 0.05
+      else
+        sleep 0.05
+        kill -0 "${ROFI_PID}" 2>/dev/null && wtype -k Return 2>/dev/null || true
+        break
+      fi
+    done
   ) &
   WATCH_PID=$!
 fi

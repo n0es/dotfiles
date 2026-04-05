@@ -8,6 +8,13 @@ if command -v pacman &> /dev/null; then
     sudo pacman -Sy --needed --noconfirm $PACKAGES
 fi
 
+# Alt+Tab workspace switcher reads /dev/input/ to detect modifier release
+if ! id -nG "$USER" | grep -qw input; then
+    echo "Adding $USER to 'input' group (needed for Alt+Tab key-state detection)..."
+    sudo usermod -aG input "$USER"
+    echo "NOTE: Log out and back in for the 'input' group to take effect."
+fi
+
 # --- 2. Oh My Zsh & Plugins ---
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
     echo "Installing Oh My Zsh..."
