@@ -33,12 +33,20 @@ PREVIEW_H=$(( PREVIEW_W * mon_h / mon_w ))
 mapfile -t all_ids < <(echo "${ws_json}" | jq -r '.[] | select(.id > 0) | .id | tostring' | sort -n)
 (( ${#all_ids[@]} <= 1 )) && exit 0
 
-# --- MRU ordering ---
+# --- Order: current workspace first, then MRU (previous, then older), then rest by id ---
+active_id="$(hyprctl -j activeworkspace 2>/dev/null | jq -r '.id // empty')"
+[[ -z "${active_id}" || "${active_id}" == "null" ]] && active_id=""
+
 declare -A ws_exists=()
 for id in "${all_ids[@]}"; do ws_exists["${id}"]=1; done
 
 ordered_ids=()
 declare -A seen=()
+
+if [[ -n "${active_id}" && -n "${ws_exists[${active_id}]+x}" ]]; then
+  ordered_ids+=("${active_id}")
+  seen["${active_id}"]=1
+fi
 
 if [[ -f "${MRU_FILE}" ]]; then
   while IFS= read -r id; do
@@ -127,6 +135,7 @@ columns="${MAX_COLUMNS}"
 (( num_ws < columns )) && columns="${num_ws}"
 lines=$(( (num_ws + columns - 1) / columns ))
 
+# Default highlight: second entry = previous workspace (MRU) after current is listed first.
 # --- Launch rofi ---
 selected_name="$(
   for line in "${rofi_lines[@]}"; do
