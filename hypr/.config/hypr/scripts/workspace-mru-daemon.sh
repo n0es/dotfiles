@@ -5,40 +5,20 @@
 
 set -euo pipefail
 
+_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=workspace-mru-lib.sh
+source "${_script_dir}/workspace-mru-lib.sh"
+
 cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/hypr"
-mru_file="${cache_dir}/workspace_mru"
 mkdir -p "${cache_dir}"
 
 : "${HYPRLAND_INSTANCE_SIGNATURE:?Run under Hyprland (HYPRLAND_INSTANCE_SIGNATURE unset)}"
 socket="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr/${HYPRLAND_INSTANCE_SIGNATURE}/.socket2.sock"
 
-prepend_mru() {
-  local id="$1"
-  local rest=""
-
-  id="${id//$'\r'/}"
-  id="${id#"${id%%[![:space:]]*}"}"
-  id="${id%"${id##*[![:space:]]}"}"
-
-  [[ -z "${id}" ]] && return 0
-
-  if [[ -f "${mru_file}" ]]; then
-    rest="$(grep -vxF "${id}" "${mru_file}" || true)"
-    rest="${rest//$'\r'/}"
-  fi
-
-  {
-    printf '%s\n' "${id}"
-    printf '%s\n' "${rest}"
-  } | awk 'NF { if (!seen[$0]++) print }' > "${mru_file}.tmp"
-
-  mv "${mru_file}.tmp" "${mru_file}"
-}
-
 seed_active() {
   local id
   id="$(hyprctl -j activeworkspace 2>/dev/null | jq -r '.id // empty')" || id=""
-  [[ -n "${id}" ]] && prepend_mru "${id}"
+  [[ -n "${id}" ]] && prepend_mru_atomic "${cache_dir}" "${id}"
 }
 
 handle_line() {
@@ -52,7 +32,7 @@ handle_line() {
       id="${data%%,*}"
       id="${id#"${id%%[![:space:]]*}"}"
       id="${id%"${id##*[![:space:]]}"}"
-      prepend_mru "${id}"
+      prepend_mru_atomic "${cache_dir}" "${id}"
       ;;
   esac
 }

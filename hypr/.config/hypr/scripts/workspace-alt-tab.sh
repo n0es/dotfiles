@@ -2,13 +2,20 @@
 # Alt+Tab workspace switcher using rofi.
 # Shows workspace previews (window layout minimap + workspace number)
 # in a horizontal grid. Accept on Alt release via rofi's ! prefix.
+#
+# Note: hyprctl reload does not re-run exec-once. If you pkill the MRU
+# daemon, it is started again automatically the next time this script runs.
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=workspace-mru-lib.sh
+source "${SCRIPT_DIR}/workspace-mru-lib.sh"
 
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/hypr"
 MRU_FILE="${CACHE_DIR}/workspace_mru"
 PREVIEW_DIR="${CACHE_DIR}/workspace_previews"
-THEME="$HOME/.config/hypr/scripts/workspace-alt-tab.rasi"
+THEME="${SCRIPT_DIR}/workspace-alt-tab.rasi"
 PREVIEW_W=192
 MAX_COLUMNS=5
 
@@ -19,6 +26,18 @@ pgrep -f "rofi.*workspace-alt-tab" >/dev/null 2>&1 && exit 0
 command -v hyprctl >/dev/null 2>&1 || exit 1
 command -v jq >/dev/null 2>&1 || exit 1
 command -v rofi >/dev/null 2>&1 || exit 1
+
+# hyprctl reload does not re-run exec-once; restart MRU if it was pkill'd.
+ensure_mru_daemon() {
+  [[ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && return 0
+  local daemon="${SCRIPT_DIR}/workspace-mru-daemon.sh"
+  [[ -f "${daemon}" ]] || return 0
+  if ! pgrep -f "workspace-mru-daemon\.sh" >/dev/null 2>&1; then
+    "${daemon}" >/dev/null 2>&1 &
+  fi
+}
+
+ensure_mru_daemon
 
 # --- Query Hyprland state (batch all queries upfront) ---
 ws_json="$(hyprctl -j workspaces 2>/dev/null || echo '[]')"
@@ -34,12 +53,29 @@ mapfile -t all_ids < <(echo "${ws_json}" | jq -r '.[] | select(.id > 0) | .id | 
 (( ${#all_ids[@]} <= 1 )) && exit 0
 
 # --- Order: current workspace first, then MRU (previous, then older), then rest by id ---
-active_id="$(hyprctl -j activeworkspace 2>/dev/null | jq -r '.id // empty')"
+# Prefer focused monitor's active workspace (matches where keyboard focus lives).
+active_id="$(echo "${monitors_json}" | jq -r '[.[] | select(.focused == true)] | .[0].activeWorkspace.id // empty')"
+if [[ -z "${active_id}" || "${active_id}" == "null" ]]; then
+  active_id="$(hyprctl -j activeworkspace 2>/dev/null | jq -r '.id // empty')"
+fi
 active_id="${active_id//$'\r'/}"
 [[ -z "${active_id}" || "${active_id}" == "null" ]] && active_id=""
 if [[ -n "${active_id}" ]]; then
   active_id="${active_id#"${active_id%%[![:space:]]*}"}"
   active_id="${active_id%"${active_id##*[![:space:]]}"}"
+fi
+
+# Heal MRU if the file still has another workspace as most-recent (e.g. daemon was stopped).
+if [[ -n "${active_id}" ]]; then
+  first_in_mru=""
+  if [[ -f "${MRU_FILE}" ]]; then
+    first_in_mru="$(head -n1 "${MRU_FILE}" | tr -d '\r')"
+    first_in_mru="${first_in_mru#"${first_in_mru%%[![:space:]]*}"}"
+    first_in_mru="${first_in_mru%"${first_in_mru##*[![:space:]]}"}"
+  fi
+  if [[ "${first_in_mru}" != "${active_id}" ]]; then
+    prepend_mru_atomic "${CACHE_DIR}" "${active_id}"
+  fi
 fi
 
 declare -A ws_exists=()
@@ -173,3 +209,4 @@ selected_id="$(echo "${ws_json}" | jq -r --arg name "${selected_name}" \
 [[ -z "${selected_id}" || "${selected_id}" == "null" ]] && exit 0
 
 hyprctl dispatch focusworkspaceoncurrentmonitor "${selected_id}" >/dev/null 2>&1 || true
+prepend_mru_atomic "${CACHE_DIR}" "${selected_id}"
