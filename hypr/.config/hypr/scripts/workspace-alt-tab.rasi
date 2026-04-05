@@ -1,12 +1,11 @@
 * {
-    font: "CaskaydiaCove Nerd Font 14";
+    font: "CaskaydiaCove Nerd Font 11";
     bg: rgba(10, 10, 10, 95%);
     fg: #d4d4d4;
     fg-muted: #666666;
     accent: #ffa032;
-    accent-bg: rgba(255, 160, 50, 20%);
-    accent-border: rgba(255, 160, 50, 30%);
-    surface: rgba(255, 255, 255, 4%);
+    accent-bg: rgba(255, 160, 50, 15%);
+    accent-border: rgba(255, 160, 50, 40%);
 }
 
 window {
@@ -14,7 +13,6 @@ window {
     border: 1px;
     border-color: @accent-border;
     border-radius: 8px;
-    width: 280px;
     location: center;
     anchor: center;
 }
@@ -22,8 +20,7 @@ window {
 mainbox {
     background-color: transparent;
     children: [ listview ];
-    spacing: 0px;
-    padding: 8px;
+    padding: 12px;
 }
 
 inputbar {
@@ -32,32 +29,36 @@ inputbar {
 
 listview {
     background-color: transparent;
-    lines: 8;
+    flow: horizontal;
+    columns: 5;
+    lines: 2;
     fixed-height: false;
-    spacing: 2px;
+    fixed-columns: true;
+    spacing: 8px;
 }
 
 element {
     background-color: transparent;
     text-color: @fg;
-    border-radius: 4px;
-    padding: 6px 10px;
-    orientation: horizontal;
-    spacing: 10px;
+    border-radius: 6px;
+    padding: 8px;
+    orientation: vertical;
+    spacing: 4px;
     children: [ element-icon, element-text ];
 }
 
 element-icon {
     background-color: transparent;
-    size: 48px 27px;
-    border-radius: 2px;
+    size: 192px 120px;
+    border-radius: 4px;
+    horizontal-align: 0.5;
 }
 
 element-text {
     background-color: transparent;
     text-color: inherit;
     highlight: none;
-    vertical-align: 0.5;
+    horizontal-align: 0.5;
 }
 
 element normal.normal,
@@ -69,6 +70,6 @@ element alternate.normal {
 element selected.normal {
     background-color: @accent-bg;
     text-color: @accent;
-    border: 1px;
+    border: 2px;
     border-color: @accent-border;
 }
